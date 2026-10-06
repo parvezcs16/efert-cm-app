@@ -38,6 +38,20 @@ class OrderItemRead(BaseModel):
     menu_item_id: uuid.UUID
     ordered_quantity: int
     kitchen_station_id: uuid.UUID | None
+    # Filled in by endpoints that look names up; not an ORM attribute.
+    menu_item_name: str | None = None
+
+
+class OrderItemUpdate(BaseModel):
+    order_item_id: uuid.UUID
+    quantity: int = Field(gt=0, le=50)
+
+
+class OrderItemsUpdateRequest(BaseModel):
+    """The items to keep, with their (possibly reduced) quantities. Items
+    of the order that are omitted are removed."""
+
+    items: list[OrderItemUpdate] = Field(min_length=1)
 
 
 class QueueOrderRequest(BaseModel):
@@ -62,3 +76,26 @@ class OrderRead(BaseModel):
     ingredient_response_message: str | None
     created_at: datetime
     items: list[OrderItemRead]
+
+
+class KitchenBoardItemRead(BaseModel):
+    """Display-only view of an order item for the kitchen big screen:
+    the item name instead of an ID, and no unit_price."""
+
+    menu_item_name: str
+    quantity: int
+    kitchen_station_id: uuid.UUID | None
+    kitchen_station_name: str | None
+
+
+class KitchenBoardOrderRead(BaseModel):
+    id: uuid.UUID
+    order_number: str
+    customer_type: CustomerType
+    order_type: OrderType
+    status: OrderStatus
+    scheduled_for: datetime | None
+    created_at: datetime
+    # Last status change, used by the board for "time in this column".
+    updated_at: datetime
+    items: list[KitchenBoardItemRead]

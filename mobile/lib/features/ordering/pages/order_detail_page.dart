@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api_client.dart';
 import '../../../core/models/order.dart';
 
-const _cancellable = {'PENDING', 'CONFIRMED', 'QUEUED', 'PREPARING', 'READY'};
+// Mirrors EDITABLE_STATUSES in the backend order service: items can be
+// changed until the kitchen queues the order.
+const _editable = {'PENDING', 'CONFIRMED'};
 
 class OrderDetailPage extends StatefulWidget {
   final String orderId;
@@ -18,7 +20,9 @@ class OrderDetailPage extends StatefulWidget {
 class _OrderDetailPageState extends State<OrderDetailPage> {
   Order? _order;
   final Map<String, ConsumptionRecord> _consumption = {};
-  bool _cancelling = false;
+  // Item id -> quantity to keep; items absent from the map are removed.
+  Map<String, int> _draft = {};
+  bool _saving = false;
   String? _error;
 
   @override
@@ -32,12 +36,28 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       final data = await ApiClient.instance.get('/orders/${widget.orderId}');
       final order = Order.fromJson(data as Map<String, dynamic>);
       if (!mounted) return;
-      setState(() => _order = order);
+      setState(() {
+        _order = order;
+        _resetDraft();
+      });
       if (order.status == 'SERVED') _loadConsumption(order);
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);
     }
+  }
+
+  void _resetDraft() {
+    _draft = {
+      for (final item in _order?.items ?? <OrderItem>[])
+        item.id: item.orderedQuantity,
+    };
+  }
+
+  bool get _dirty {
+    final order = _order;
+    if (order == null) return false;
+    return order.items.any((i) => _draft[i.id] != i.orderedQuantity);
   }
 
   Future<void> _loadConsumption(Order order) async {
@@ -58,14 +78,53 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     }
   }
 
-  Future<void> _cancel() async {
-    setState(() => _cancelling = true);
+  Future<void> _update() async {
+    // Removing every item leaves nothing to serve, so it cancels the order.
+    final cancelling = _draft.isEmpty;
+    if (cancelling) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Cancel order?'),
+          content: const Text(
+            'You removed every item. This will cancel the whole order.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Keep order'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Cancel order'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
+    setState(() => _saving = true);
     try {
-      await ApiClient.instance.post('/orders/${widget.orderId}/cancel');
+      if (cancelling) {
+        await ApiClient.instance.post('/orders/${widget.orderId}/cancel');
+      } else {
+        await ApiClient.instance.put(
+          '/orders/${widget.orderId}/items',
+          body: {
+            'items': [
+              for (final entry in _draft.entries)
+                {'order_item_id': entry.key, 'quantity': entry.value},
+            ],
+          },
+        );
+      }
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Order cancelled')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(cancelling ? 'Order cancelled' : 'Order updated'),
+        ),
+      );
       _load();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -73,7 +132,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         context,
       ).showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
-      if (mounted) setState(() => _cancelling = false);
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -173,6 +232,11 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       return const Center(child: CircularProgressIndicator());
     }
 
+    final editable = _editable.contains(order.status);
+    final visibleItems = editable
+        ? order.items.where((i) => _draft.containsKey(i.id))
+        : order.items;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -222,7 +286,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           ),
         ],
         const SizedBox(height: 16),
-        for (final item in order.items)
+        for (final item in visibleItems)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
@@ -231,7 +295,13 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Qty ordered: ${item.orderedQuantity}'),
+                      Text(
+                        item.menuItemName ?? 'Item',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text(
+                        'Qty ordered: ${editable ? _draft[item.id] : item.orderedQuantity}',
+                      ),
                       if (_consumption[item.id] != null)
                         Text(
                           'Served: ${_consumption[item.id]!.servedQuantity}'
@@ -241,6 +311,27 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                     ],
                   ),
                 ),
+                if (editable) ...[
+                  IconButton(
+                    tooltip: 'Decrease quantity',
+                    icon: const Icon(Icons.remove_circle_outline),
+                    onPressed: _saving || _draft[item.id]! <= 1
+                        ? null
+                        : () => setState(
+                            () => _draft[item.id] = _draft[item.id]! - 1,
+                          ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove item',
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    onPressed: _saving
+                        ? null
+                        : () => setState(() => _draft.remove(item.id)),
+                  ),
+                ],
                 if (_consumption[item.id]?.status == 'VALIDATED')
                   OutlinedButton(
                     onPressed: () => _openCorrection(item.id),
@@ -249,20 +340,40 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
               ],
             ),
           ),
-        if (_cancellable.contains(order.status)) ...[
-          const SizedBox(height: 16),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
+        if (editable) ...[
+          if (_draft.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'All items removed — updating will cancel this order.',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
-            onPressed: _cancelling ? null : _cancel,
-            child: _cancelling
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Cancel order'),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              if (_dirty) ...[
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _saving ? null : () => setState(_resetDraft),
+                    child: const Text('Undo changes'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: FilledButton(
+                  onPressed: _saving || !_dirty ? null : _update,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Update order'),
+                ),
+              ),
+            ],
           ),
         ],
       ],

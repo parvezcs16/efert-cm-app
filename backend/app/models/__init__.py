@@ -4,6 +4,7 @@ from app.models.billing import LedgerAccount, LedgerEntry
 from app.models.consumption import ConsumptionRecord
 from app.models.employee import Employee, EmployeeRegistration
 from app.models.guest import Guest, GuestSession
+from app.models.in_app_notification import InAppNotification
 from app.models.location import KitchenStation, Location
 from app.models.menu import MenuCategory, MenuItem, MenuItemLocation
 from app.models.notification import Notification
@@ -35,4 +36,5 @@ __all__ = [
     "ReviewCategory",
     "ReviewCategoryRating",
     "Notification",
+    "InAppNotification",
 ]

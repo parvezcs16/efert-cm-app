@@ -36,7 +36,12 @@ class LoginService:
             raise AuthenticationError(_GENERIC_INVALID_CREDENTIALS)
 
         if employee.status == EmployeeStatus.PENDING_ACTIVATION:
-            raise ValidationAppError("Account must be activated before logging in")
+            # Distinct code so clients can send a first-time user straight into
+            # activation; only reachable after the temporary password verified.
+            raise ValidationAppError(
+                "Account must be activated before logging in",
+                error_code="activation_required",
+            )
         if employee.status in (EmployeeStatus.SUSPENDED, EmployeeStatus.INACTIVE):
             raise AuthenticationError("Account is not active")
 

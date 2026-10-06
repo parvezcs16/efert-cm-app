@@ -321,3 +321,56 @@ async def test_station_queue_prioritizes_immediate_over_booked_fifo(
     assert queue_resp.status_code == 200
     order_numbers = [o["order_number"] for o in queue_resp.json()]
     assert order_numbers == [immediate["order_number"], booked["order_number"]]
+
+
+async def test_kitchen_board_shows_active_orders_with_item_names_and_station_filter(
+    client: AsyncClient, seed_active_employee: SeedEmployee
+) -> None:
+    admin, admin_password = await seed_active_employee(
+        p_no="ADM-037", email="admin37@example.com", role=EmployeeRole.SYSTEM_ADMINISTRATOR
+    )
+    admin_headers = await _login(client, admin.p_no, admin_password)
+    setup = await _setup_location_with_item_and_station(client, admin_headers, code="KB8")
+    location_id = setup["location_id"]
+
+    employee, password = await seed_active_employee(p_no="EMP-037", email="emp37@example.com")
+    headers = await _login(client, employee.p_no, password)
+    queued = await _place_order(client, headers, location_id, setup["item_id"])
+    waiting = await _place_order(client, headers, location_id, setup["item_id"])
+    served = await _place_order(client, headers, location_id, setup["item_id"])
+
+    operator, o_password = await seed_active_employee(
+        p_no="KOP-037", email="kop37@example.com", role=EmployeeRole.KITCHEN_OPERATOR
+    )
+    kitchen_headers = await _login(client, operator.p_no, o_password)
+
+    await client.post(f"{API}/orders/{queued['id']}/confirm", headers=kitchen_headers)
+    await client.post(
+        f"{API}/orders/{queued['id']}/queue",
+        json={"station_assignments": {queued["items"][0]["id"]: setup["station_id"]}},
+        headers=kitchen_headers,
+    )
+    await client.post(f"{API}/orders/{served['id']}/serve-directly", headers=kitchen_headers)
+
+    board = await client.get(
+        f"{API}/locations/{location_id}/kitchen/board", headers=kitchen_headers
+    )
+    assert board.status_code == 200, board.text
+    by_id = {o["id"]: o for o in board.json()}
+    assert set(by_id) == {queued["id"], waiting["id"]}
+    assert by_id[queued["id"]]["status"] == "QUEUED"
+    item = by_id[queued["id"]]["items"][0]
+    assert item["menu_item_name"] == "Biryani"
+    assert item["quantity"] == 1
+    assert item["kitchen_station_name"] == "Main Kitchen"
+    assert "unit_price" not in item
+
+    station_board = await client.get(
+        f"{API}/locations/{location_id}/kitchen/board",
+        params={"station_id": setup["station_id"]},
+        headers=kitchen_headers,
+    )
+    assert [o["id"] for o in station_board.json()] == [queued["id"]]
+
+    forbidden = await client.get(f"{API}/locations/{location_id}/kitchen/board", headers=headers)
+    assert forbidden.status_code == 403

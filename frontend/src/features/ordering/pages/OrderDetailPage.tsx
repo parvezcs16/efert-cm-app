@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Minus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -18,14 +19,21 @@ import { Textarea } from '@/components/ui/textarea'
 import { apiFetch, getErrorMessage } from '@/lib/api'
 import type { ConsumptionRecord, Order } from '@/lib/types'
 
-const CANCELLABLE = new Set(['PENDING', 'CONFIRMED', 'QUEUED', 'PREPARING', 'READY'])
+// Mirrors EDITABLE_STATUSES in the backend order service: items can be
+// changed until the kitchen queues the order.
+const EDITABLE = new Set(['PENDING', 'CONFIRMED'])
+
+const draftFrom = (order: Order): Record<string, number> =>
+  Object.fromEntries(order.items.map((item) => [item.id, item.ordered_quantity]))
 
 export function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>()
   const navigate = useNavigate()
   const [order, setOrder] = useState<Order | null>(null)
   const [consumption, setConsumption] = useState<Record<string, ConsumptionRecord>>({})
-  const [cancelling, setCancelling] = useState(false)
+  // Item id -> quantity to keep; items absent from the map are removed.
+  const [draft, setDraft] = useState<Record<string, number>>({})
+  const [saving, setSaving] = useState(false)
   const [correctionItemId, setCorrectionItemId] = useState<string | null>(null)
   const [requestedQuantity, setRequestedQuantity] = useState('0')
   const [reason, setReason] = useState('')
@@ -34,7 +42,10 @@ export function OrderDetailPage() {
   const load = () => {
     if (!orderId) return
     apiFetch<Order>(`/orders/${orderId}`)
-      .then(setOrder)
+      .then((loaded) => {
+        setOrder(loaded)
+        setDraft(draftFrom(loaded))
+      })
       .catch((err) => toast.error(getErrorMessage(err)))
   }
 
@@ -59,16 +70,33 @@ export function OrderDetailPage() {
     )
   }
 
-  const handleCancel = async () => {
-    setCancelling(true)
+  const editable = EDITABLE.has(order.status)
+  const draftEntries = Object.entries(draft)
+  const dirty = order.items.some((item) => draft[item.id] !== item.ordered_quantity)
+
+  const handleUpdate = async () => {
+    // Removing every item leaves nothing to serve, so it cancels the order.
+    const cancelling = draftEntries.length === 0
+    if (cancelling && !window.confirm('You removed every item. Cancel the whole order?')) return
+
+    setSaving(true)
     try {
-      await apiFetch(`/orders/${order.id}/cancel`, { method: 'POST' })
-      toast.success('Order cancelled')
+      if (cancelling) {
+        await apiFetch(`/orders/${order.id}/cancel`, { method: 'POST' })
+      } else {
+        await apiFetch(`/orders/${order.id}/items`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            items: draftEntries.map(([order_item_id, quantity]) => ({ order_item_id, quantity })),
+          }),
+        })
+      }
+      toast.success(cancelling ? 'Order cancelled' : 'Order updated')
       load()
     } catch (err) {
       toast.error(getErrorMessage(err))
     } finally {
-      setCancelling(false)
+      setSaving(false)
     }
   }
 
@@ -132,11 +160,14 @@ export function OrderDetailPage() {
 
           <div className="flex flex-col gap-2">
             {order.items.map((item) => {
+              if (editable && !(item.id in draft)) return null
               const record = consumption[item.id]
+              const quantity = editable ? draft[item.id] : item.ordered_quantity
               return (
-                <div key={item.id} className="flex items-center justify-between border-b pb-2">
-                  <div>
-                    <p className="text-sm">Qty ordered: {item.ordered_quantity}</p>
+                <div key={item.id} className="flex items-center justify-between gap-2 border-b pb-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{item.menu_item_name ?? 'Item'}</p>
+                    <p className="text-sm">Qty ordered: {quantity}</p>
                     {record && (
                       <p className="text-sm text-muted-foreground">
                         Served: {record.served_quantity}
@@ -145,6 +176,34 @@ export function OrderDetailPage() {
                       </p>
                     )}
                   </div>
+                  {editable && (
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        aria-label="Decrease quantity"
+                        disabled={saving || quantity <= 1}
+                        onClick={() => setDraft((prev) => ({ ...prev, [item.id]: quantity - 1 }))}
+                      >
+                        <Minus />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        aria-label="Remove item"
+                        className="text-destructive"
+                        disabled={saving}
+                        onClick={() =>
+                          setDraft((prev) => {
+                            const { [item.id]: _removed, ...rest } = prev
+                            return rest
+                          })
+                        }
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  )}
                   {record && record.status === 'VALIDATED' && (
                     <Button variant="outline" size="sm" onClick={() => openCorrection(item.id)}>
                       Report an issue
@@ -155,11 +214,30 @@ export function OrderDetailPage() {
             })}
           </div>
 
-          {CANCELLABLE.has(order.status) && (
-            <Button variant="destructive" onClick={handleCancel} disabled={cancelling}>
-              {cancelling && <Spinner />}
-              Cancel order
-            </Button>
+          {editable && (
+            <>
+              {draftEntries.length === 0 && (
+                <p className="text-sm text-destructive">
+                  All items removed — updating will cancel this order.
+                </p>
+              )}
+              <div className="flex gap-2">
+                {dirty && (
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    disabled={saving}
+                    onClick={() => setDraft(draftFrom(order))}
+                  >
+                    Undo changes
+                  </Button>
+                )}
+                <Button className="flex-1" onClick={handleUpdate} disabled={saving || !dirty}>
+                  {saving && <Spinner />}
+                  Update order
+                </Button>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

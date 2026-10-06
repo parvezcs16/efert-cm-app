@@ -1,5 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 
+import { BrandLogo, BrandStripe } from '@/components/BrandLogo'
+import { NotificationBell } from '@/components/NotificationBell'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/features/auth/AuthContext'
 import { hasRole, KITCHEN_STAFF_ROLES, ADMIN_ROLES } from '@/lib/roles'
@@ -30,10 +32,12 @@ export function AppLayout() {
 
   return (
     <div className="flex min-h-svh flex-col">
-      <header className="border-b">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <span className="font-semibold">Central Mess</span>
-          <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+      <header className="sticky top-0 z-10 border-b bg-card/95 backdrop-blur">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2">
+          <NavLink to="/" aria-label="Home">
+            <BrandLogo />
+          </NavLink>
+          <nav className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm">
             {links.map((link) => (
               <NavLink
                 key={link.to}
@@ -41,8 +45,8 @@ export function AppLayout() {
                 end={link.to === '/order'}
                 className={({ isActive }) =>
                   cn(
-                    'text-muted-foreground hover:text-foreground',
-                    isActive && 'font-medium text-foreground',
+                    'rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                    isActive && 'bg-accent font-medium text-primary',
                   )
                 }
               >
@@ -51,6 +55,7 @@ export function AppLayout() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
+            <NotificationBell />
             <span className="text-muted-foreground">
               {employee?.name} ({employee?.p_no})
             </span>
@@ -59,6 +64,7 @@ export function AppLayout() {
             </Button>
           </div>
         </div>
+        <BrandStripe />
       </header>
       <main className="flex-1 p-4">
         <Outlet />

@@ -1,8 +1,9 @@
-import { Minus, Plus } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { BrandLogo, BrandStripe } from '@/components/BrandLogo'
+import { MenuItemTile } from '@/components/MenuItemTile'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,14 +15,35 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
-import { guestApiFetch } from '@/lib/api'
+import { GuestSessionEnded } from '@/features/guests/components/GuestSessionEnded'
+import type { GuestEndReason } from '@/features/guests/components/GuestSessionEnded'
+import { ApiError, guestApiFetch } from '@/lib/api'
 import { guestAuthStorage } from '@/lib/auth-storage'
-import type { Location, MenuBrowseCategory, Order } from '@/lib/types'
+import type { GuestSession, Location, MenuBrowseCategory, Order } from '@/lib/types'
+
+interface GuestAuthResponse {
+  access_token: string
+  session: GuestSession
+}
+
+// How often an open portal re-checks the session, so a guest sees the
+// "session ended" screen soon after the host closes it.
+const SESSION_CHECK_MS = 30_000
+
+/** A closed session answers 403 and an expired/invalid token 401 (see
+ * backend app/api/v1/deps.py:get_current_guest_session). */
+function endReasonFor(err: unknown): GuestEndReason | null {
+  if (err instanceof ApiError) {
+    if (err.status === 403) return 'closed'
+    if (err.status === 401) return 'expired'
+  }
+  return null
+}
 
 export function GuestPortalPage() {
   const [searchParams] = useSearchParams()
-  const [status, setStatus] = useState<'authenticating' | 'ready' | 'error'>('authenticating')
-  const [error, setError] = useState('')
+  const [status, setStatus] = useState<'authenticating' | 'ready' | 'ended'>('authenticating')
+  const [endReason, setEndReason] = useState<GuestEndReason>('closed')
 
   const [locations, setLocations] = useState<Location[]>([])
   const [locationId, setLocationId] = useState('')
@@ -30,30 +52,63 @@ export function GuestPortalPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [submitting, setSubmitting] = useState(false)
 
+  const endSession = useCallback((reason: GuestEndReason) => {
+    guestAuthStorage.clear()
+    // A closed session's QR token can still ask the host to reopen it.
+    if (reason !== 'closed') guestAuthStorage.clearQrToken()
+    setEndReason(reason)
+    setStatus('ended')
+  }, [])
+
+  const resumeSession = useCallback((accessToken: string) => {
+    guestAuthStorage.setAccessToken(accessToken)
+    setStatus('ready')
+  }, [])
+
+  /** Ends the portal on a closed/expired session; otherwise shows `message`. */
+  const handleGuestError = useCallback(
+    (err: unknown, message: string) => {
+      const reason = endReasonFor(err)
+      if (reason) endSession(reason)
+      else toast.error(message)
+    },
+    [endSession],
+  )
+
   useEffect(() => {
     const urlToken = searchParams.get('token')
     const authenticate = async () => {
+      if (!urlToken) {
+        if (guestAuthStorage.getAccessToken()) setStatus('ready')
+        else endSession('missing')
+        return
+      }
       try {
-        if (urlToken) {
-          const result = await fetch(`/api/v1/guest/auth`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: urlToken }),
-          })
-          if (!result.ok) throw new Error('This QR code is no longer valid.')
-          const body = await result.json()
-          guestAuthStorage.setAccessToken(body.access_token)
-        } else if (!guestAuthStorage.getAccessToken()) {
-          throw new Error('Scan a guest QR code to get started.')
+        const result = await fetch(`/api/v1/guest/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: urlToken }),
+        })
+        if (!result.ok) {
+          endSession('expired')
+          return
         }
+        const body: GuestAuthResponse = await result.json()
+        guestAuthStorage.setQrToken(urlToken)
+        // The QR stays valid for 24h after the host closes the session, so
+        // auth can succeed for a session that can no longer order.
+        if (body.session.status !== 'ACTIVE') {
+          endSession('closed')
+          return
+        }
+        guestAuthStorage.setAccessToken(body.access_token)
         setStatus('ready')
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unable to start your session')
-        setStatus('error')
+      } catch {
+        toast.error('Unable to reach Central Mess. Please check your connection and try again.')
       }
     }
     void authenticate()
-  }, [searchParams])
+  }, [searchParams, endSession])
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -63,21 +118,29 @@ export function GuestPortalPage() {
         setLocations(active)
         if (active.length > 0) setLocationId(active[0].id)
       })
-      .catch(() => toast.error('Could not load locations'))
-    guestApiFetch<Order[]>('/guest/orders')
-      .then(setOrders)
-      .catch(() => {
-        // No orders yet is fine.
-      })
-  }, [status])
+      .catch((err) => handleGuestError(err, 'Could not load locations'))
+
+    const loadOrders = () =>
+      guestApiFetch<Order[]>('/guest/orders')
+        .then(setOrders)
+        .catch((err) => {
+          // A transient failure just keeps the last list; only a
+          // closed/expired session ends the portal.
+          const reason = endReasonFor(err)
+          if (reason) endSession(reason)
+        })
+    void loadOrders()
+    const timer = window.setInterval(loadOrders, SESSION_CHECK_MS)
+    return () => window.clearInterval(timer)
+  }, [status, handleGuestError, endSession])
 
   useEffect(() => {
     if (!locationId) return
     setCart({})
     guestApiFetch<MenuBrowseCategory[]>(`/guest/locations/${locationId}/menu`)
       .then(setCategories)
-      .catch(() => toast.error('Could not load the menu'))
-  }, [locationId])
+      .catch((err) => handleGuestError(err, 'Could not load the menu'))
+  }, [locationId, handleGuestError])
 
   const itemCount = useMemo(() => Object.values(cart).reduce((sum, q) => sum + q, 0), [cart])
 
@@ -108,8 +171,8 @@ export function GuestPortalPage() {
       toast.success(`Order ${order.order_number} placed`)
       setCart({})
       setOrders((prev) => [order, ...prev])
-    } catch {
-      toast.error('Could not place your order — your host may have closed this session')
+    } catch (err) {
+      handleGuestError(err, 'Could not place your order. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -123,19 +186,23 @@ export function GuestPortalPage() {
     )
   }
 
-  if (status === 'error') {
+  if (status === 'ended') {
     return (
-      <div className="flex min-h-svh items-center justify-center p-4">
-        <Card className="max-w-sm">
-          <CardContent className="p-6 text-center text-sm text-muted-foreground">{error}</CardContent>
-        </Card>
-      </div>
+      <GuestSessionEnded
+        reason={endReason}
+        qrToken={guestAuthStorage.getQrToken()}
+        onResumed={resumeSession}
+      />
     )
   }
 
   return (
-    <div className="mx-auto flex min-h-svh max-w-2xl flex-col gap-4 p-4">
-      <h1 className="text-lg font-semibold">Welcome</h1>
+    <div className="mx-auto flex min-h-svh max-w-3xl flex-col gap-4 p-4">
+      <div className="flex flex-col gap-3">
+        <BrandLogo />
+        <BrandStripe className="rounded-full" />
+        <h1 className="text-lg font-semibold">Welcome</h1>
+      </div>
 
       <Select value={locationId} onValueChange={setLocationId}>
         <SelectTrigger>
@@ -155,36 +222,14 @@ export function GuestPortalPage() {
           <CardHeader>
             <CardTitle className="text-base">{category.name}</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+          <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {category.items.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium">{item.name}</p>
-                  {item.description && (
-                    <p className="text-sm text-muted-foreground">{item.description}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => adjustCart(item.id, -1)}
-                    disabled={!cart[item.id]}
-                  >
-                    <Minus />
-                  </Button>
-                  <span className="w-4 text-center text-sm">{cart[item.id] ?? 0}</span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => adjustCart(item.id, 1)}
-                  >
-                    <Plus />
-                  </Button>
-                </div>
-              </div>
+              <MenuItemTile
+                key={item.id}
+                item={item}
+                quantity={cart[item.id] ?? 0}
+                onAdjust={(delta) => adjustCart(item.id, delta)}
+              />
             ))}
           </CardContent>
         </Card>

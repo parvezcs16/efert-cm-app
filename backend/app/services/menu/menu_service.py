@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.models.enums import ActiveStatus
 from app.models.menu import MenuCategory, MenuItem, MenuItemLocation
 from app.repositories.location_repository import LocationRepository
@@ -15,6 +15,7 @@ from app.repositories.menu_repository import (
     MenuItemRepository,
 )
 from app.services.audit_service import AuditService
+from app.services.media.image_storage import menu_image_storage
 
 
 class MenuService:
@@ -152,6 +153,44 @@ class MenuService:
         )
         return item
 
+    async def set_item_image(
+        self, *, item_id: uuid.UUID, image_data: bytes, updated_by_id: uuid.UUID
+    ) -> MenuItem:
+        item = await self.get_item(item_id)
+        storage = menu_image_storage()
+        old_url = item.image_url
+        item.image_url = storage.save(image_data)
+        await self.items.flush()
+
+        await self.audit.record(
+            action="menu_item.image_updated",
+            entity_type="menu_item",
+            entity_id=str(item.id),
+            actor_employee_id=updated_by_id,
+            old_values={"image_url": old_url},
+            new_values={"image_url": item.image_url},
+        )
+        storage.delete(old_url)
+        return item
+
+    async def remove_item_image(self, *, item_id: uuid.UUID, updated_by_id: uuid.UUID) -> MenuItem:
+        item = await self.get_item(item_id)
+        old_url = item.image_url
+        if old_url is None:
+            return item
+        item.image_url = None
+        await self.items.flush()
+
+        await self.audit.record(
+            action="menu_item.image_removed",
+            entity_type="menu_item",
+            entity_id=str(item.id),
+            actor_employee_id=updated_by_id,
+            old_values={"image_url": old_url},
+        )
+        menu_image_storage().delete(old_url)
+        return item
+
     # -- Location availability/pricing -----------------------------------
 
     async def upsert_item_location(
@@ -197,6 +236,51 @@ class MenuService:
 
     async def list_item_locations(self, location_id: uuid.UUID) -> list[MenuItemLocation]:
         return await self.item_locations.list_for_location(location_id)
+
+    async def publish_menu(
+        self,
+        *,
+        location_id: uuid.UUID,
+        menu_item_ids: set[uuid.UUID],
+        published_by_id: uuid.UUID,
+    ) -> list[MenuItemLocation]:
+        """Replace the location's live (orderable) dish set in one step: the
+        given items become available, every other priced item at this
+        location is unpublished but stays in the catalog. Prices and
+        effective windows are left untouched."""
+        if await self.locations.get_by_id(location_id) is None:
+            raise NotFoundError("Location not found")
+
+        entries = await self.item_locations.list_for_location(location_id)
+        priced_ids = {entry.menu_item_id for entry in entries}
+        unpriced = menu_item_ids - priced_ids
+        if unpriced:
+            raise ValidationAppError(
+                f"{len(unpriced)} selected item(s) have no price at this location; "
+                "set a price before publishing them"
+            )
+
+        published: list[str] = []
+        unpublished: list[str] = []
+        for entry in entries:
+            is_available = entry.menu_item_id in menu_item_ids
+            if entry.is_available != is_available:
+                (published if is_available else unpublished).append(str(entry.menu_item_id))
+            entry.is_available = is_available
+        await self.item_locations.flush()
+
+        await self.audit.record(
+            action="menu.published",
+            entity_type="location",
+            entity_id=str(location_id),
+            actor_employee_id=published_by_id,
+            new_values={
+                "published_item_ids": published,
+                "unpublished_item_ids": unpublished,
+                "live_item_count": len(menu_item_ids),
+            },
+        )
+        return entries
 
     # -- Employee-facing browsing (no prices) ----------------------------
 

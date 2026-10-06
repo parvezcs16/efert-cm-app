@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
 import '../auth_controller.dart';
+import 'activation_page.dart';
+import '../../../widgets/brand.dart';
+import '../../../widgets/server_settings.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -31,11 +34,24 @@ class _LoginPageState extends State<LoginPage> {
       );
       if (!mounted) return;
       if (mustChangePassword) {
-        context.go('/activate', extra: _pNoController.text);
+        context.go('/activate', extra: ActivationArgs(_pNoController.text));
       } else {
         context.go('/');
       }
     } on ApiException catch (err) {
+      if (err.errorCode == 'activation_required') {
+        // First sign-in with the temporary password: the server has already
+        // verified it, so continue straight into activation instead of
+        // making the user re-enter it on a separate screen.
+        context.go(
+          '/activate',
+          extra: ActivationArgs(
+            _pNoController.text,
+            temporaryPassword: _passwordController.text,
+          ),
+        );
+        return;
+      }
       setState(() => _error = err.message);
     } catch (_) {
       setState(() => _error = 'Something went wrong');
@@ -57,6 +73,8 @@ class _LoginPageState extends State<LoginPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const Center(child: BrandLogo(height: 64)),
+                  const SizedBox(height: 32),
                   Text(
                     'Sign in',
                     style: Theme.of(context).textTheme.headlineSmall,
@@ -76,6 +94,13 @@ class _LoginPageState extends State<LoginPage> {
                     obscureText: true,
                     onSubmitted: (_) => _submit(),
                   ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => context.go('/forgot-password'),
+                      child: const Text('Forgot password?'),
+                    ),
+                  ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
                     Text(
@@ -85,7 +110,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _loading ? null : _submit,
                     child: _loading
@@ -97,18 +122,18 @@ class _LoginPageState extends State<LoginPage> {
                         : const Text('Sign in'),
                   ),
                   const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: () => context.go('/activate'),
-                    child: const Text('Activate your account'),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text('New here?'),
+                      TextButton(
+                        onPressed: () => context.go('/register'),
+                        child: const Text('Register'),
+                      ),
+                    ],
                   ),
-                  TextButton(
-                    onPressed: () => context.go('/forgot-password'),
-                    child: const Text('Forgot your password?'),
-                  ),
-                  TextButton(
-                    onPressed: () => context.go('/register'),
-                    child: const Text('Register as a new employee'),
-                  ),
+                  const SizedBox(height: 24),
+                  const ServerSettingsButton(),
                 ],
               ),
             ),

@@ -143,3 +143,8 @@ class NotificationChannel(str, enum.Enum):
 class NotificationStatus(str, enum.Enum):
     SENT = "SENT"
     FAILED = "FAILED"
+
+
+class InAppNotificationType(str, enum.Enum):
+    DAILY_SERVED_SUMMARY = "DAILY_SERVED_SUMMARY"
+    GUEST_REOPEN_REQUEST = "GUEST_REOPEN_REQUEST"

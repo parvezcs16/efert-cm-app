@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_lockout_minutes: int = 15
 
+    # Uploaded files (menu images) are written under media_root and served
+    # read-only at media_url_prefix.
+    media_root: str = "media"
+    media_url_prefix: str = "/media"
+    max_image_upload_bytes: int = 5 * 1024 * 1024
+
+    # "End of day" for the daily served-orders notification, in the mess's
+    # local time. A fixed UTC offset (minutes) rather than a tz name keeps
+    # this free of a tzdata dependency; the default is PKT (UTC+5, no DST).
+    business_utc_offset_minutes: int = 300
+    daily_summary_hour: int = 21
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

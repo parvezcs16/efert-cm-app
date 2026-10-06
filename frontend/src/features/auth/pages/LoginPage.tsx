@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
+import { BrandLogo, BrandStripe } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -40,8 +41,10 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-4">
-      <Card className="w-full max-w-sm">
+    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-gradient-to-br from-secondary via-background to-accent p-4">
+      <BrandLogo size="lg" />
+      <Card className="w-full max-w-sm overflow-hidden">
+        <BrandStripe />
         <CardHeader>
           <CardTitle className="text-xl">Sign in</CardTitle>
           <CardDescription>Use your P-Number and password.</CardDescription>

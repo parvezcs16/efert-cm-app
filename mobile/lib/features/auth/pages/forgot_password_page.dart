@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/api_client.dart';
+import '../../../widgets/brand.dart';
 
 enum _Step { request, otp, password, done }
 
@@ -77,6 +78,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const Center(child: BrandLogo(height: 64)),
+                  const SizedBox(height: 32),
                   Text(
                     'Reset your password',
                     style: Theme.of(context).textTheme.headlineSmall,

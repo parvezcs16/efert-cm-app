@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     kitchen,
     locations,
     menu,
+    notifications,
     orders,
     reports,
     reviews,
@@ -33,3 +34,4 @@ api_router.include_router(guests.router)
 api_router.include_router(guest_portal.router)
 api_router.include_router(reviews.router)
 api_router.include_router(reports.router)
+api_router.include_router(notifications.router)

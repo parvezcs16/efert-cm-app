@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -240,6 +241,13 @@ export function KitchenPage() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
+      <div className="flex justify-end">
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/kitchen/display${locationId ? `?location=${locationId}` : ''}`}>
+            Open kitchen display screen
+          </Link>
+        </Button>
+      </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Select value={locationId} onValueChange={setLocationId}>
           <SelectTrigger>

@@ -173,3 +173,127 @@ async def test_menu_category_item_and_pricing_flow(
     )
     assert listing.status_code == 200
     assert any(entry["menu_item_id"] == item_id for entry in listing.json())
+
+
+async def test_publishing_menu_limits_browse_and_ordering_to_selected_dishes(
+    client: AsyncClient, seed_active_employee: SeedEmployee
+) -> None:
+    admin, admin_password = await seed_active_employee(
+        p_no="ADM-014", email="admin14@example.com", role=EmployeeRole.SYSTEM_ADMINISTRATOR
+    )
+    employee, employee_password = await seed_active_employee(
+        p_no="EMP-014", email="emp14@example.com"
+    )
+    headers = await _login(client, admin.p_no, admin_password)
+    employee_headers = await _login(client, employee.p_no, employee_password)
+
+    location_id = (
+        await client.post(
+            f"{API}/locations", json={"name": "Branch D", "code": "BRD"}, headers=headers
+        )
+    ).json()["id"]
+    category_id = (
+        await client.post(
+            f"{API}/locations/{location_id}/menu-categories",
+            json={"name": "Mains"},
+            headers=headers,
+        )
+    ).json()["id"]
+
+    item_ids: dict[str, str] = {}
+    for name in ("Biryani", "Karahi", "Daal"):
+        item_id = (
+            await client.post(
+                f"{API}/locations/{location_id}/menu-categories/{category_id}/items",
+                json={"name": name},
+                headers=headers,
+            )
+        ).json()["id"]
+        await client.put(
+            f"{API}/locations/{location_id}/menu-items/{item_id}/availability",
+            json={"is_available": True, "price": "300.00"},
+            headers=headers,
+        )
+        item_ids[name] = item_id
+
+    publish = await client.put(
+        f"{API}/locations/{location_id}/menu/published",
+        json={"menu_item_ids": [item_ids["Biryani"], item_ids["Daal"]]},
+        headers=headers,
+    )
+    assert publish.status_code == 200, publish.text
+    live = {e["menu_item_id"]: e["is_available"] for e in publish.json()}
+    assert live == {item_ids["Biryani"]: True, item_ids["Karahi"]: False, item_ids["Daal"]: True}
+
+    browse = await client.get(
+        f"{API}/locations/{location_id}/menu/browse", headers=employee_headers
+    )
+    assert browse.status_code == 200
+    assert sorted(i["name"] for c in browse.json() for i in c["items"]) == ["Biryani", "Daal"]
+
+    # The unpublished dish stays in the catalog for the admin.
+    catalog = await client.get(
+        f"{API}/locations/{location_id}/menu-categories/{category_id}/items", headers=headers
+    )
+    assert len(catalog.json()) == 3
+
+    # Employees can't publish.
+    forbidden = await client.put(
+        f"{API}/locations/{location_id}/menu/published",
+        json={"menu_item_ids": []},
+        headers=employee_headers,
+    )
+    assert forbidden.status_code == 403
+
+
+async def test_publishing_unpriced_item_is_rejected_without_changes(
+    client: AsyncClient, seed_active_employee: SeedEmployee
+) -> None:
+    admin, admin_password = await seed_active_employee(
+        p_no="ADM-015", email="admin15@example.com", role=EmployeeRole.SYSTEM_ADMINISTRATOR
+    )
+    headers = await _login(client, admin.p_no, admin_password)
+
+    location_id = (
+        await client.post(
+            f"{API}/locations", json={"name": "Branch E", "code": "BRE"}, headers=headers
+        )
+    ).json()["id"]
+    category_id = (
+        await client.post(
+            f"{API}/locations/{location_id}/menu-categories",
+            json={"name": "Snacks"},
+            headers=headers,
+        )
+    ).json()["id"]
+    priced_id = (
+        await client.post(
+            f"{API}/locations/{location_id}/menu-categories/{category_id}/items",
+            json={"name": "Samosa"},
+            headers=headers,
+        )
+    ).json()["id"]
+    await client.put(
+        f"{API}/locations/{location_id}/menu-items/{priced_id}/availability",
+        json={"is_available": True, "price": "60.00"},
+        headers=headers,
+    )
+    unpriced_id = (
+        await client.post(
+            f"{API}/locations/{location_id}/menu-categories/{category_id}/items",
+            json={"name": "Pakora"},
+            headers=headers,
+        )
+    ).json()["id"]
+
+    rejected = await client.put(
+        f"{API}/locations/{location_id}/menu/published",
+        json={"menu_item_ids": [unpriced_id]},
+        headers=headers,
+    )
+    assert rejected.status_code == 422
+
+    listing = await client.get(
+        f"{API}/locations/{location_id}/menu-items/availability", headers=headers
+    )
+    assert [e["is_available"] for e in listing.json()] == [True]

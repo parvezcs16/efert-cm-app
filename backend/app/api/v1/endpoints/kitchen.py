@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import require_kitchen_staff
 from app.core.database import get_db
 from app.models.employee import Employee
-from app.schemas.order import OrderRead, QueueOrderRequest
+from app.schemas.order import KitchenBoardOrderRead, OrderRead, QueueOrderRequest
 from app.services.kitchen.kitchen_service import KitchenService
 
 router = APIRouter(tags=["kitchen"])
@@ -95,3 +95,13 @@ async def get_station_queue(
 ) -> list[OrderRead]:
     orders = await KitchenService(db).get_station_queue(location_id, station_id)
     return [OrderRead.model_validate(o) for o in orders]
+
+
+@router.get("/locations/{location_id}/kitchen/board", response_model=list[KitchenBoardOrderRead])
+async def get_kitchen_board(
+    location_id: uuid.UUID,
+    station_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(require_kitchen_staff),
+) -> list[KitchenBoardOrderRead]:
+    return await KitchenService(db).get_board(location_id, station_id)

@@ -35,6 +35,18 @@ async def test_full_registration_to_login_flow(
     approval_email = next(e for e in outbox if e["to"] == "newhire@example.com")
     temporary_password = approval_email["body"].split("temporary password is ")[1].split(".")[0]
 
+    first_login = await client.post(
+        f"{API}/login", json={"p_no": "EMP-100", "password": temporary_password}
+    )
+    assert first_login.status_code == 422
+    assert first_login.json()["error_code"] == "activation_required"
+
+    wrong_first_login = await client.post(
+        f"{API}/login", json={"p_no": "EMP-100", "password": "not-the-temp-password"}
+    )
+    assert wrong_first_login.status_code == 401
+    assert wrong_first_login.json()["error_code"] == "authentication_error"
+
     start = await client.post(
         f"{API}/activation/start",
         json={"p_no": "EMP-100", "temporary_password": temporary_password},

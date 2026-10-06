@@ -248,3 +248,59 @@ async def test_employee_cannot_see_or_cancel_others_orders(
 
     cancel_resp = await client.post(f"{API}/orders/{order['id']}/cancel", headers=intruder_headers)
     assert cancel_resp.status_code == 404
+
+
+async def test_employee_removes_items_and_reduces_quantity_until_queued(
+    client: AsyncClient, seed_active_employee: SeedEmployee
+) -> None:
+    admin, admin_password = await seed_active_employee(
+        p_no="ADM-028", email="admin28@example.com", role=EmployeeRole.SYSTEM_ADMINISTRATOR
+    )
+    admin_headers = await _login(client, admin.p_no, admin_password)
+    location_id, item_id = await _setup_orderable_item(client, admin_headers)
+
+    employee, password = await seed_active_employee(p_no="EMP-028", email="emp28@example.com")
+    headers = await _login(client, employee.p_no, password)
+
+    order = (
+        await client.post(
+            f"{API}/orders",
+            json={
+                "location_id": location_id,
+                "order_type": "DINE_IN",
+                "items": [
+                    {"menu_item_id": item_id, "quantity": 3},
+                    {"menu_item_id": item_id, "quantity": 1},
+                ],
+            },
+            headers=headers,
+        )
+    ).json()
+    assert order["items"][0]["menu_item_name"] == "Daal Chawal"
+    keep, drop = order["items"]
+
+    confirm = await client.post(f"{API}/orders/{order['id']}/confirm", headers=admin_headers)
+    assert confirm.status_code == 200, confirm.text
+
+    increase = await client.put(
+        f"{API}/orders/{order['id']}/items",
+        json={"items": [{"order_item_id": keep["id"], "quantity": 4}]},
+        headers=headers,
+    )
+    assert increase.status_code == 422
+
+    update = await client.put(
+        f"{API}/orders/{order['id']}/items",
+        json={"items": [{"order_item_id": keep["id"], "quantity": 2}]},
+        headers=headers,
+    )
+    assert update.status_code == 200, update.text
+    body = update.json()
+    assert body["status"] == "CONFIRMED"
+    assert [(i["id"], i["ordered_quantity"]) for i in body["items"]] == [(keep["id"], 2)]
+    assert drop["id"] not in {i["id"] for i in body["items"]}
+
+    empty = await client.put(
+        f"{API}/orders/{order['id']}/items", json={"items": []}, headers=headers
+    )
+    assert empty.status_code == 422

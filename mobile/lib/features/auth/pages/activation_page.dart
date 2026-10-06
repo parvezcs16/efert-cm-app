@@ -4,13 +4,25 @@ import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
 import '../auth_controller.dart';
+import '../../../widgets/brand.dart';
 
 enum _Step { credentials, otp, password }
 
+/// Route `extra` for `/activate`. When [temporaryPassword] is given (a
+/// first sign-in the server rejected with `activation_required`), the page
+/// sends the activation code itself and opens on the code step.
+class ActivationArgs {
+  final String pNo;
+  final String? temporaryPassword;
+
+  const ActivationArgs(this.pNo, {this.temporaryPassword});
+}
+
 class ActivationPage extends StatefulWidget {
   final String? initialPNo;
+  final String? temporaryPassword;
 
-  const ActivationPage({super.key, this.initialPNo});
+  const ActivationPage({super.key, this.initialPNo, this.temporaryPassword});
 
   @override
   State<ActivationPage> createState() => _ActivationPageState();
@@ -19,7 +31,7 @@ class ActivationPage extends StatefulWidget {
 class _ActivationPageState extends State<ActivationPage> {
   _Step _step = _Step.credentials;
   late final TextEditingController _pNoController;
-  final _tempPasswordController = TextEditingController();
+  late final TextEditingController _tempPasswordController;
   final _codeController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
@@ -31,6 +43,22 @@ class _ActivationPageState extends State<ActivationPage> {
   void initState() {
     super.initState();
     _pNoController = TextEditingController(text: widget.initialPNo ?? '');
+    _tempPasswordController = TextEditingController(
+      text: widget.temporaryPassword ?? '',
+    );
+    if (widget.temporaryPassword != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _start());
+    }
+  }
+
+  @override
+  void dispose() {
+    _pNoController.dispose();
+    _tempPasswordController.dispose();
+    _codeController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -57,6 +85,7 @@ class _ActivationPageState extends State<ActivationPage> {
         'temporary_password': _tempPasswordController.text,
       },
     );
+    if (!mounted) return;
     setState(() => _step = _Step.otp);
   });
 
@@ -105,6 +134,8 @@ class _ActivationPageState extends State<ActivationPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const Center(child: BrandLogo(height: 64)),
+                  const SizedBox(height: 32),
                   Text(
                     'Activate your account',
                     style: Theme.of(context).textTheme.headlineSmall,
@@ -113,7 +144,9 @@ class _ActivationPageState extends State<ActivationPage> {
                   Text(switch (_step) {
                     _Step.credentials =>
                       'Enter your P-Number and temporary password.',
-                    _Step.otp => 'Enter the code sent to your email.',
+                    _Step.otp =>
+                      'This is your first sign-in. Enter the code sent to '
+                          'your email to activate your account.',
                     _Step.password => 'Choose a new password.',
                   }),
                   const SizedBox(height: 24),
@@ -138,6 +171,13 @@ class _ActivationPageState extends State<ActivationPage> {
                       ),
                       keyboardType: TextInputType.number,
                       maxLength: 6,
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _loading ? null : _start,
+                        child: const Text('Resend code'),
+                      ),
                     ),
                   ] else ...[
                     TextField(

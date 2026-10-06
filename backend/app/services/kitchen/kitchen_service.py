@@ -6,7 +6,9 @@ from app.core.exceptions import NotFoundError, ValidationAppError
 from app.models.enums import ActiveStatus, IngredientStatus, OrderStatus, OrderType
 from app.models.order import Order
 from app.repositories.location_repository import KitchenStationRepository
+from app.repositories.menu_repository import MenuItemRepository
 from app.repositories.order_repository import OrderRepository
+from app.schemas.order import KitchenBoardItemRead, KitchenBoardOrderRead
 from app.services.audit_service import AuditService
 from app.services.consumption.consumption_service import ConsumptionService
 from app.websocket.manager import kitchen_ws_manager
@@ -26,6 +28,16 @@ NON_TERMINAL_STATUSES = {
 # (docs/kitchen.md "Queue"). Ingredient-confirmation gating for booked
 # orders before they may be queued is Phase 7 -- not enforced here yet.
 _PRIORITY_RANK = {OrderType.DINE_IN: 0, OrderType.TAKEAWAY: 0, OrderType.BOOK_FOR_LATER: 1}
+
+# Everything the kitchen big screen shows: from "just placed" through
+# "waiting at the pass". SERVED/CANCELLED drop off the board.
+BOARD_STATUSES = [
+    OrderStatus.PENDING,
+    OrderStatus.CONFIRMED,
+    OrderStatus.QUEUED,
+    OrderStatus.PREPARING,
+    OrderStatus.READY,
+]
 
 
 class KitchenService:
@@ -158,6 +170,62 @@ class KitchenService:
             o for o in orders if any(item.kitchen_station_id == station_id for item in o.items)
         ]
         return sorted(at_station, key=lambda o: (_PRIORITY_RANK[o.order_type], o.created_at))
+
+    async def get_board(
+        self, location_id: uuid.UUID, station_id: uuid.UUID | None = None
+    ) -> list[KitchenBoardOrderRead]:
+        """Read-only snapshot for the kitchen display screen. Booked orders
+        whose ingredients aren't confirmed yet are left off (nothing to cook
+        until management signs them off). With a station filter, only
+        orders routed to that station appear, showing only its items --
+        orders not yet queued to any station are therefore hidden."""
+        orders = await self.orders.list_for_location_by_status(location_id, BOARD_STATUSES)
+        orders = [
+            o
+            for o in orders
+            if o.order_type != OrderType.BOOK_FOR_LATER
+            or o.ingredient_status == IngredientStatus.CONFIRMED
+        ]
+
+        stations = await self.stations.list_for_location(location_id)
+        station_names = {s.id: s.name for s in stations}
+        item_names = await MenuItemRepository(self.db).get_names(
+            {item.menu_item_id for o in orders for item in o.items}
+        )
+
+        board: list[KitchenBoardOrderRead] = []
+        for order in sorted(orders, key=lambda o: (_PRIORITY_RANK[o.order_type], o.created_at)):
+            items = [
+                item
+                for item in order.items
+                if station_id is None or item.kitchen_station_id == station_id
+            ]
+            if not items:
+                continue
+            board.append(
+                KitchenBoardOrderRead(
+                    id=order.id,
+                    order_number=order.order_number,
+                    customer_type=order.customer_type,
+                    order_type=order.order_type,
+                    status=order.status,
+                    scheduled_for=order.scheduled_for,
+                    created_at=order.created_at,
+                    updated_at=order.updated_at,
+                    items=[
+                        KitchenBoardItemRead(
+                            menu_item_name=item_names.get(item.menu_item_id, "Unknown item"),
+                            quantity=item.ordered_quantity,
+                            kitchen_station_id=item.kitchen_station_id,
+                            kitchen_station_name=station_names.get(item.kitchen_station_id)
+                            if item.kitchen_station_id
+                            else None,
+                        )
+                        for item in items
+                    ],
+                )
+            )
+        return board
 
     async def _record_and_broadcast(
         self, order: Order, actor_id: uuid.UUID, *, action: str | None = None

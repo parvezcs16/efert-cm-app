@@ -11,6 +11,7 @@ import { RegisterPage } from '@/features/auth/pages/RegisterPage'
 import { BillingPage } from '@/features/billing/pages/BillingPage'
 import { GuestPortalPage } from '@/features/guests/pages/GuestPortalPage'
 import { GuestsPage } from '@/features/guests/pages/GuestsPage'
+import { KitchenDisplayPage } from '@/features/kitchen/pages/KitchenDisplayPage'
 import { KitchenPage } from '@/features/kitchen/pages/KitchenPage'
 import { OrderDetailPage } from '@/features/ordering/pages/OrderDetailPage'
 import { OrderingPage } from '@/features/ordering/pages/OrderingPage'
@@ -27,6 +28,8 @@ function App() {
       <Route path="/guest" element={<GuestPortalPage />} />
 
       <Route element={<ProtectedRoute />}>
+        {/* Full-screen wall display: deliberately outside AppLayout's nav chrome. */}
+        <Route path="/kitchen/display" element={<KitchenDisplayPage />} />
         <Route element={<AppLayout />}>
           <Route path="/" element={<RoleHome />} />
           <Route path="/order" element={<OrderingPage />} />

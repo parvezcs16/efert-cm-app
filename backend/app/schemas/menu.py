@@ -47,6 +47,7 @@ class MenuItemRead(BaseModel):
     category_id: uuid.UUID
     name: str
     description: str | None
+    image_url: str | None
     status: ActiveStatus
 
 
@@ -69,12 +70,20 @@ class MenuItemLocationRead(BaseModel):
     effective_to: datetime | None
 
 
+class MenuPublishRequest(BaseModel):
+    """The complete set of dishes to offer at a location. Everything else in
+    the location's priced catalog is unpublished in the same transaction."""
+
+    menu_item_ids: list[uuid.UUID] = Field(max_length=1000)
+
+
 class MenuBrowseItem(BaseModel):
     """Employee-facing: no price, no internal availability-window details."""
 
     id: uuid.UUID
     name: str
     description: str | None
+    image_url: str | None
 
 
 class MenuBrowseCategory(BaseModel):

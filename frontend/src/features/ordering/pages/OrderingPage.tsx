@@ -1,8 +1,10 @@
-import { Minus, Plus, ShoppingCart } from 'lucide-react'
+import { ShoppingCart } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { CategoryNav } from '@/components/CategoryNav'
+import { MenuItemTile } from '@/components/MenuItemTile'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -56,6 +58,15 @@ export function OrderingPage() {
   }, [locationId])
 
   const itemCount = useMemo(() => Object.values(cart).reduce((sum, q) => sum + q, 0), [cart])
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
+  // Falls back to the first category when the menu (re)loads, e.g. after
+  // switching location. The cart is kept across category switches.
+  const selectedCategory =
+    categories.find((c) => c.id === selectedCategoryId) ?? categories[0] ?? null
+  const navEntries = useMemo(
+    () => categories.map((c) => ({ id: c.id, name: c.name, count: c.items.length })),
+    [categories],
+  )
 
   const adjustCart = (itemId: string, delta: number) => {
     setCart((prev) => {
@@ -104,7 +115,7 @@ export function OrderingPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex max-w-6xl flex-col gap-4">
       <Card>
         <CardHeader>
           <CardTitle>Place an order</CardTitle>
@@ -165,45 +176,30 @@ export function OrderingPage() {
           No items available at this location right now.
         </p>
       ) : (
-        categories.map((category) => (
-          <Card key={category.id}>
-            <CardHeader>
-              <CardTitle className="text-base">{category.name}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {category.items.map((item) => (
-                <div key={item.id} className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">{item.name}</p>
-                    {item.description && (
-                      <p className="text-sm text-muted-foreground">{item.description}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      onClick={() => adjustCart(item.id, -1)}
-                      disabled={!cart[item.id]}
-                    >
-                      <Minus />
-                    </Button>
-                    <span className="w-4 text-center text-sm">{cart[item.id] ?? 0}</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      onClick={() => adjustCart(item.id, 1)}
-                    >
-                      <Plus />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        ))
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[12rem_1fr] lg:gap-6">
+          <CategoryNav
+            categories={navEntries}
+            selectedId={selectedCategory?.id ?? null}
+            onSelect={setSelectedCategoryId}
+          />
+          {selectedCategory && (
+            <Card className="min-w-0">
+              <CardHeader>
+                <CardTitle className="text-base">{selectedCategory.name}</CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {selectedCategory.items.map((item) => (
+                  <MenuItemTile
+                    key={item.id}
+                    item={item}
+                    quantity={cart[item.id] ?? 0}
+                    onAdjust={(delta) => adjustCart(item.id, delta)}
+                  />
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       <div className="sticky bottom-4 flex justify-end">

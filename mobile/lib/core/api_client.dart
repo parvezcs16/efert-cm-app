@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'auth_storage.dart';
+import 'server_config.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -26,22 +27,26 @@ class ApiClient {
 
   static final ApiClient instance = ApiClient._();
 
-  /// Override at build/run time with
+  /// Set at build/run time with
   /// `--dart-define=API_BASE_URL=http://10.0.2.2:8000/api/v1` (Android
-  /// emulator's alias for the host machine) or your deployed API's URL.
-  static const String baseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://localhost:8000/api/v1',
-  );
+  /// emulator's alias for the host machine) or your deployed API's URL, or
+  /// overridden on-device from the login screen -- see [ServerConfig].
+  static String get baseUrl => ServerConfig.apiBaseUrl;
 
   /// Origin of the deployed React web app that serves the guest QR
   /// self-service portal (`/guest?token=...`) -- the native app hosts guests
   /// (see [ApiClient] doc comment) but points their QR at the web portal.
-  /// Override with `--dart-define=WEB_APP_BASE_URL=https://mess.example.com`.
-  static const String webAppBaseUrl = String.fromEnvironment(
-    'WEB_APP_BASE_URL',
-    defaultValue: 'http://localhost:8000',
-  );
+  /// Set with `--dart-define=WEB_APP_BASE_URL=https://mess.example.com`.
+  static String get webAppBaseUrl => ServerConfig.webAppBaseUrl;
+
+  static const Duration _timeout = Duration(seconds: 15);
+
+  /// Resolves a server-relative media path (e.g. `/media/menu/x.jpg`, as
+  /// returned in `image_url`) against the API's origin.
+  static String? mediaUrl(String? path) {
+    if (path == null || path.isEmpty) return null;
+    return Uri.parse(baseUrl).resolve(path).toString();
+  }
 
   final EmployeeAuthStorage authStorage = EmployeeAuthStorage();
   Future<bool>? _refreshInFlight;
@@ -57,6 +62,39 @@ class ApiClient {
 
   Future<dynamic> patch(String path, {Map<String, dynamic>? body}) =>
       _request('PATCH', path, body: body);
+
+  Future<dynamic> delete(String path) => _request('DELETE', path);
+
+  /// Multipart PUT of a single file field (used for menu item images).
+  /// Same auth + refresh-once-on-401 behavior as the JSON helpers.
+  Future<dynamic> putFile(
+    String path, {
+    required String field,
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    final uri = _buildUri(path, null);
+
+    Future<http.Response> send(String? token) async {
+      final request = http.MultipartRequest('PUT', uri)
+        ..files.add(
+          http.MultipartFile.fromBytes(field, bytes, filename: filename),
+        );
+      if (token != null) request.headers['Authorization'] = 'Bearer $token';
+      return http.Response.fromStream(await request.send());
+    }
+
+    final token = await authStorage.getAccessToken();
+    var response = await send(token);
+    if (response.statusCode == 401 && token != null) {
+      if (await _refreshToken()) {
+        response = await send(await authStorage.getAccessToken());
+      } else {
+        await authStorage.clear();
+      }
+    }
+    return _parse(response);
+  }
 
   Uri _buildUri(String path, Map<String, dynamic>? query) {
     final uri = Uri.parse('$baseUrl$path');
@@ -86,17 +124,40 @@ class ApiClient {
     };
     final encodedBody = body != null ? jsonEncode(body) : null;
 
+    final Future<http.Response> response;
     switch (method) {
       case 'GET':
-        return http.get(uri, headers: headers);
+        response = http.get(uri, headers: headers);
       case 'POST':
-        return http.post(uri, headers: headers, body: encodedBody);
+        response = http.post(uri, headers: headers, body: encodedBody);
       case 'PUT':
-        return http.put(uri, headers: headers, body: encodedBody);
+        response = http.put(uri, headers: headers, body: encodedBody);
       case 'PATCH':
-        return http.patch(uri, headers: headers, body: encodedBody);
+        response = http.patch(uri, headers: headers, body: encodedBody);
+      case 'DELETE':
+        response = http.delete(uri, headers: headers);
       default:
         throw ArgumentError('Unsupported method $method');
+    }
+    return _guardNetwork(response);
+  }
+
+  /// Turns "server unreachable" failures (wrong IP, firewall, different
+  /// network) into an [ApiException] naming the server, instead of a
+  /// generic error or a multi-minute hang.
+  Future<http.Response> _guardNetwork(Future<http.Response> response) async {
+    try {
+      return await response.timeout(_timeout);
+    } on TimeoutException {
+      throw ApiException(
+        'Server at ${Uri.parse(baseUrl).authority} is not responding',
+        0,
+      );
+    } on http.ClientException {
+      throw ApiException(
+        'Cannot reach server at ${Uri.parse(baseUrl).authority}',
+        0,
+      );
     }
   }
 

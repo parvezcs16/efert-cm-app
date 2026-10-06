@@ -271,3 +271,54 @@ async def test_employee_cannot_manage_another_hosts_guest(
 
     get_resp = await client.get(f"{API}/guests/{guest_id}", headers=other_headers)
     assert get_resp.status_code == 404
+
+
+async def test_guest_can_ask_host_to_reopen_closed_session(
+    client: AsyncClient,
+    seed_active_employee: SeedEmployee,
+    outbox: list[dict[str, str]],
+) -> None:
+    host, password = await seed_active_employee(p_no="EMP-055", email="emp55@example.com")
+    headers = await _login(client, host.p_no, password)
+    guest_id = (
+        await client.post(
+            f"{API}/guests",
+            json={
+                "name": "Returning Visitor",
+                "company_name": "Gamma Ltd",
+                "cnic": "55555-5555555-5",
+                "guest_type": "PRIVATE",
+                "accompanying_persons": 0,
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+    session = (await client.post(f"{API}/guests/{guest_id}/sessions", headers=headers)).json()
+    qr_token = session["qr_token"]
+
+    # Nothing to ask for while the session is still open.
+    early = await client.post(f"{API}/guest/session/reopen-request", json={"token": qr_token})
+    assert early.status_code == 422
+
+    await client.post(f"{API}/guests/sessions/{session['session']['id']}/close", headers=headers)
+
+    request = await client.post(f"{API}/guest/session/reopen-request", json={"token": qr_token})
+    assert request.status_code == 202, request.text
+    assert len(outbox) == 1
+    assert outbox[0]["to"] == "emp55@example.com"
+    assert "Returning Visitor" in outbox[0]["subject"]
+
+    # The host also sees it in their in-app inbox.
+    inbox = (await client.get(f"{API}/notifications", headers=headers)).json()
+    assert len(inbox) == 1
+    assert inbox[0]["type"] == "GUEST_REOPEN_REQUEST"
+    assert inbox[0]["link"] == "/guests"
+    assert "Returning Visitor" in inbox[0]["title"]
+
+    # Repeat taps within the cooldown don't spam the host.
+    repeat = await client.post(f"{API}/guest/session/reopen-request", json={"token": qr_token})
+    assert repeat.status_code == 429
+    assert len(outbox) == 1
+
+    bogus = await client.post(f"{API}/guest/session/reopen-request", json={"token": "nope"})
+    assert bogus.status_code == 401

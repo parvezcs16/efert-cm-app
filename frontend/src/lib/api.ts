@@ -34,7 +34,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
 function buildInit(init: RequestInit | undefined, token: string | null): RequestInit {
   const headers = new Headers(init?.headers)
-  if (init?.body !== undefined && !headers.has('Content-Type')) {
+  // FormData needs the browser-generated multipart boundary header.
+  if (init?.body !== undefined && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   if (token) {

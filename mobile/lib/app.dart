@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import 'core/theme.dart';
 import 'features/administration/pages/administration_page.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/pages/activation_page.dart';
@@ -51,8 +52,13 @@ GoRouter buildRouter(AuthController auth) {
       ),
       GoRoute(
         path: '/activate',
-        builder: (context, state) =>
-            ActivationPage(initialPNo: state.extra as String?),
+        builder: (context, state) {
+          final args = state.extra as ActivationArgs?;
+          return ActivationPage(
+            initialPNo: args?.pNo,
+            temporaryPassword: args?.temporaryPassword,
+          );
+        },
       ),
       GoRoute(
         path: '/forgot-password',
@@ -131,8 +137,8 @@ class _CentralMessAppState extends State<CentralMessApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Central Mess',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      title: 'EFERT Central Mess',
+      theme: buildAppTheme(),
       routerConfig: _router,
     );
   }

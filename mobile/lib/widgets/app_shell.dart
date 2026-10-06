@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/models/employee.dart';
 import '../features/auth/auth_controller.dart';
+import 'brand.dart';
 
 class NavDestination {
   final String path;
@@ -49,22 +50,41 @@ class AppShell extends StatelessWidget {
     ];
 
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Text(title),
+        actions: const [
+          Padding(padding: EdgeInsets.only(right: 12), child: _AppBarMark()),
+        ],
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(4),
+          child: BrandStripe(),
+        ),
+      ),
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
             DrawerHeader(
+              padding: EdgeInsets.zero,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  const Text(
-                    'Central Mess',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          const BrandLogo(height: 48),
+                          const SizedBox(height: 12),
+                          if (employee != null)
+                            Text('${employee.name} (${employee.pNo})'),
+                        ],
+                      ),
+                    ),
                   ),
-                  if (employee != null)
-                    Text('${employee.name} (${employee.pNo})'),
+                  const BrandStripe(),
                 ],
               ),
             ),
@@ -91,6 +111,23 @@ class AppShell extends StatelessWidget {
         ),
       ),
       body: child,
+    );
+  }
+}
+
+/// Logo mark on a white chip so it stays legible on the green app bar.
+class _AppBarMark extends StatelessWidget {
+  const _AppBarMark();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const BrandLogo(height: 24, showName: false),
     );
   }
 }

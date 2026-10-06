@@ -41,6 +41,14 @@ class MenuItemRepository:
         )
         return list(result.scalars().all())
 
+    async def get_names(self, item_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        if not item_ids:
+            return {}
+        result = await self.db.execute(
+            select(MenuItem.id, MenuItem.name).where(MenuItem.id.in_(item_ids))
+        )
+        return {row.id: row.name for row in result}
+
     def add(self, item: MenuItem) -> None:
         self.db.add(item)
 

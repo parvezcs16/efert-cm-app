@@ -1,12 +1,14 @@
 class OrderItem {
   final String id;
   final String menuItemId;
+  final String? menuItemName;
   final int orderedQuantity;
   final String? kitchenStationId;
 
   OrderItem({
     required this.id,
     required this.menuItemId,
+    required this.menuItemName,
     required this.orderedQuantity,
     required this.kitchenStationId,
   });
@@ -14,6 +16,7 @@ class OrderItem {
   factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
     id: json['id'] as String,
     menuItemId: json['menu_item_id'] as String,
+    menuItemName: json['menu_item_name'] as String?,
     orderedQuantity: json['ordered_quantity'] as int,
     kitchenStationId: json['kitchen_station_id'] as String?,
   );

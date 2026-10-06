@@ -1,16 +1,29 @@
 import hashlib
 import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AuthenticationError, NotFoundError, ValidationAppError
+from app.core.exceptions import (
+    AuthenticationError,
+    NotFoundError,
+    RateLimitedError,
+    ValidationAppError,
+)
 from app.core.security import GUEST_SESSION_TOKEN_VALIDITY
-from app.models.enums import GuestSessionStatus, GuestType
+from app.models.enums import GuestSessionStatus, GuestType, InAppNotificationType
 from app.models.guest import Guest, GuestSession
+from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.guest_repository import GuestRepository, GuestSessionRepository
+from app.repositories.notification_repository import NotificationRepository
 from app.services.audit_service import AuditService
+from app.services.notifications.dispatch_service import NotificationDispatchService
+from app.services.notifications.in_app_service import InAppNotificationService
+
+REOPEN_REQUEST_NOTIFICATION_TYPE = "guest_session.reopen_requested"
+# Stops a guest from flooding their host's inbox by tapping repeatedly.
+REOPEN_REQUEST_COOLDOWN = timedelta(minutes=5)
 
 
 def _hash_token(raw: str) -> str:
@@ -23,6 +36,10 @@ class GuestService:
         self.guests = GuestRepository(db)
         self.sessions = GuestSessionRepository(db)
         self.audit = AuditService(db)
+        self.employees = EmployeeRepository(db)
+        self.notifications = NotificationRepository(db)
+        self.notifier = NotificationDispatchService(db)
+        self.inbox = InAppNotificationService(db)
 
     async def register(
         self,
@@ -156,4 +173,59 @@ class GuestService:
         session = await self.sessions.get_by_token_hash(_hash_token(raw_token))
         if session is None or session.token_expires_at <= datetime.now(UTC):
             raise AuthenticationError("Invalid or expired guest token")
+        return session
+
+    async def request_reopen(self, raw_token: str) -> GuestSession:
+        """Lets a guest whose session the host closed ask the host to reopen
+        it. Authenticated by the raw QR token, which stays valid for 24h
+        after close (see `authenticate`). Only notifies -- reopening is
+        still the host's decision via `reopen_session`."""
+        session = await self.authenticate(raw_token)
+        if session.status != GuestSessionStatus.CLOSED:
+            raise ValidationAppError("Session is not closed")
+
+        session_ref = str(session.id)
+        last_sent = await self.notifications.latest_created_at(
+            type=REOPEN_REQUEST_NOTIFICATION_TYPE, payload_reference=session_ref
+        )
+        if last_sent is not None and datetime.now(UTC) - last_sent < REOPEN_REQUEST_COOLDOWN:
+            raise RateLimitedError(
+                "Your host has already been notified. "
+                "Please wait a few minutes before asking again."
+            )
+
+        guest = await self.get(session.guest_id)
+        host = await self.employees.get_by_id(session.host_employee_id)
+        if host is None:
+            raise NotFoundError("Host not found")
+
+        await self.notifier.send_email(
+            to=host.email,
+            subject=f"{guest.name} would like to order again",
+            body=(
+                f"Your guest {guest.name} ({guest.company_name}) has asked to reopen "
+                "their Central Mess session so they can place another order.\n\n"
+                "If you'd like to allow this, open the Guests page and reopen their session. "
+                "Their existing QR code will start working again."
+            ),
+            type=REOPEN_REQUEST_NOTIFICATION_TYPE,
+            payload_reference=session_ref,
+        )
+
+        await self.inbox.notify(
+            employee_id=host.id,
+            type=InAppNotificationType.GUEST_REOPEN_REQUEST,
+            title=f"{guest.name} is requesting access",
+            body=(
+                f"Your guest {guest.name} ({guest.company_name}) would like to order again. "
+                "Reopen their session from the Guests page to allow it."
+            ),
+            link="/guests",
+        )
+
+        await self.audit.record(
+            action=REOPEN_REQUEST_NOTIFICATION_TYPE,
+            entity_type="guest_session",
+            entity_id=session_ref,
+        )
         return session

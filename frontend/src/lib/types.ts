@@ -59,6 +59,7 @@ export interface MenuItem {
   category_id: string
   name: string
   description: string | null
+  image_url: string | null
   status: ActiveStatus
 }
 
@@ -76,6 +77,7 @@ export interface MenuBrowseItem {
   id: string
   name: string
   description: string | null
+  image_url: string | null
 }
 
 export interface MenuBrowseCategory {
@@ -100,6 +102,7 @@ export type IngredientStatus = 'PENDING' | 'CONFIRMED' | 'DELAYED'
 export interface OrderItem {
   id: string
   menu_item_id: string
+  menu_item_name: string | null
   ordered_quantity: number
   kitchen_station_id: string | null
 }
@@ -116,6 +119,25 @@ export interface Order {
   ingredient_response_message: string | null
   created_at: string
   items: OrderItem[]
+}
+
+export interface KitchenBoardItem {
+  menu_item_name: string
+  quantity: number
+  kitchen_station_id: string | null
+  kitchen_station_name: string | null
+}
+
+export interface KitchenBoardOrder {
+  id: string
+  order_number: string
+  customer_type: CustomerType
+  order_type: OrderType
+  status: OrderStatus
+  scheduled_for: string | null
+  created_at: string
+  updated_at: string
+  items: KitchenBoardItem[]
 }
 
 export type GuestType = 'PRIVATE' | 'OFFICIAL'
@@ -241,4 +263,16 @@ export interface ReconciliationReport {
   until: string
   lines: ReconciliationLine[]
   mismatch_count: number
+}
+
+export type InAppNotificationType = 'DAILY_SERVED_SUMMARY' | 'GUEST_REOPEN_REQUEST'
+
+export interface InAppNotification {
+  id: string
+  type: InAppNotificationType
+  title: string
+  body: string
+  link: string | null
+  read_at: string | null
+  created_at: string
 }

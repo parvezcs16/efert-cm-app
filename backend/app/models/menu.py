@@ -44,6 +44,9 @@ class MenuItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000))
+    # Public URL path of the item's photo (e.g. /media/menu/<file>.jpg),
+    # set via the image upload endpoint -- see app/services/media.
+    image_url: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[ActiveStatus] = mapped_column(
         enum_column(ActiveStatus, "menu_item_status"), default=ActiveStatus.ACTIVE, nullable=False
     )

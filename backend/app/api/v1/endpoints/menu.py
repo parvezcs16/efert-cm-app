@@ -1,9 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_employee, require_location_authority
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.exceptions import ValidationAppError
 from app.models.employee import Employee
@@ -18,6 +19,7 @@ from app.schemas.menu import (
     MenuItemLocationUpsertRequest,
     MenuItemRead,
     MenuItemUpdateRequest,
+    MenuPublishRequest,
 )
 from app.services.menu.menu_service import MenuService
 
@@ -39,7 +41,12 @@ async def browse_menu(
             name=category.name,
             display_order=category.display_order,
             items=[
-                MenuBrowseItem(id=item.id, name=item.name, description=item.description)
+                MenuBrowseItem(
+                    id=item.id,
+                    name=item.name,
+                    description=item.description,
+                    image_url=item.image_url,
+                )
                 for item in items
             ],
         )
@@ -91,9 +98,7 @@ async def update_menu_category(
     return MenuCategoryRead.model_validate(category)
 
 
-@router.post(
-    "/menu-categories/{category_id}/items", response_model=MenuItemRead, status_code=201
-)
+@router.post("/menu-categories/{category_id}/items", response_model=MenuItemRead, status_code=201)
 async def create_menu_item(
     location_id: uuid.UUID,
     category_id: uuid.UUID,
@@ -146,6 +151,36 @@ async def update_menu_item(
     return MenuItemRead.model_validate(item)
 
 
+@router.put("/menu-items/{item_id}/image", response_model=MenuItemRead)
+async def upload_menu_item_image(
+    location_id: uuid.UUID,
+    item_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    manager: Employee = Depends(require_location_authority),
+) -> MenuItemRead:
+    """Attach (or replace) the item's photo. JPEG/PNG/WebP, size-limited
+    by settings.max_image_upload_bytes; validated in ImageStorage."""
+    # Read one byte past the limit so oversize uploads are rejected without
+    # buffering an arbitrarily large body.
+    data = await file.read(get_settings().max_image_upload_bytes + 1)
+    item = await MenuService(db).set_item_image(
+        item_id=item_id, image_data=data, updated_by_id=manager.id
+    )
+    return MenuItemRead.model_validate(item)
+
+
+@router.delete("/menu-items/{item_id}/image", response_model=MenuItemRead)
+async def remove_menu_item_image(
+    location_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    manager: Employee = Depends(require_location_authority),
+) -> MenuItemRead:
+    item = await MenuService(db).remove_item_image(item_id=item_id, updated_by_id=manager.id)
+    return MenuItemRead.model_validate(item)
+
+
 @router.put(
     "/menu-items/{item_id}/availability",
     response_model=MenuItemLocationRead,
@@ -176,4 +211,21 @@ async def list_menu_item_availability(
     manager: Employee = Depends(require_location_authority),
 ) -> list[MenuItemLocationRead]:
     entries = await MenuService(db).list_item_locations(location_id)
+    return [MenuItemLocationRead.model_validate(e) for e in entries]
+
+
+@router.put("/menu/published", response_model=list[MenuItemLocationRead])
+async def publish_menu(
+    location_id: uuid.UUID,
+    payload: MenuPublishRequest,
+    db: AsyncSession = Depends(get_db),
+    manager: Employee = Depends(require_location_authority),
+) -> list[MenuItemLocationRead]:
+    """Publish the dishes employees and guests can order from right now.
+    The full catalog is kept; unselected items are just hidden."""
+    entries = await MenuService(db).publish_menu(
+        location_id=location_id,
+        menu_item_ids=set(payload.menu_item_ids),
+        published_by_id=manager.id,
+    )
     return [MenuItemLocationRead.model_validate(e) for e in entries]

@@ -51,7 +51,12 @@ async def browse_guest_menu(
             name=category.name,
             display_order=category.display_order,
             items=[
-                MenuBrowseItem(id=item.id, name=item.name, description=item.description)
+                MenuBrowseItem(
+                    id=item.id,
+                    name=item.name,
+                    description=item.description,
+                    image_url=item.image_url,
+                )
                 for item in items
             ],
         )
@@ -73,6 +78,17 @@ async def guest_auth(
         expires_in=int(GUEST_ACCESS_TOKEN_TTL.total_seconds()),
         session=GuestSessionRead.model_validate(session),
     )
+
+
+@router.post("/session/reopen-request", status_code=202)
+async def request_session_reopen(
+    payload: GuestAuthRequest, db: AsyncSession = Depends(get_db)
+) -> dict[str, str]:
+    """Called from the "session ended" screen: notifies the host that their
+    guest would like to order again. Takes the QR token rather than a guest
+    access token, since the latter is rejected once the session is closed."""
+    await GuestService(db).request_reopen(payload.token)
+    return {"status": "requested"}
 
 
 @router.post("/orders", response_model=OrderRead, status_code=201)

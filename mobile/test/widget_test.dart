@@ -19,9 +19,12 @@ void main() {
     expect(find.text('Sign in'), findsWidgets);
     expect(find.widgetWithText(TextField, 'P-Number'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Password'), findsOneWidget);
-    expect(find.text('Activate your account'), findsOneWidget);
-    expect(find.text('Forgot your password?'), findsOneWidget);
-    expect(find.text('Register as a new employee'), findsOneWidget);
+    expect(find.text('Forgot password?'), findsOneWidget);
+    expect(find.text('New here?'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Register'), findsOneWidget);
+    // Activation is reached by signing in with the temporary password, not
+    // from a separate link.
+    expect(find.text('Activate your account'), findsNothing);
   });
 
   testWidgets(

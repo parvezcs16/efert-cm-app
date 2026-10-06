@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/models/location.dart';
 import '../../../core/models/menu.dart';
+import '../../../core/theme.dart';
+import '../../../widgets/brand.dart';
 
 class MenuTab extends StatefulWidget {
   const MenuTab({super.key});
@@ -190,6 +193,7 @@ class _ItemsForCategory extends StatefulWidget {
 
 class _ItemsForCategoryState extends State<_ItemsForCategory> {
   List<MenuItem>? _items;
+  String? _busyItemId;
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
 
@@ -250,6 +254,50 @@ class _ItemsForCategoryState extends State<_ItemsForCategory> {
     }
   }
 
+  String _imagePath(MenuItem item) =>
+      '/locations/${widget.locationId}/menu-items/${item.id}/image';
+
+  Future<void> _updateImage(
+    MenuItem item,
+    Future<dynamic> Function() action,
+  ) async {
+    setState(() => _busyItemId = item.id);
+    try {
+      final updated = MenuItem.fromJson(await action() as Map<String, dynamic>);
+      if (!mounted) return;
+      setState(() {
+        _items = _items?.map((i) => i.id == updated.id ? updated : i).toList();
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busyItemId = null);
+    }
+  }
+
+  Future<void> _pickImage(MenuItem item) async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1200,
+      maxHeight: 1200,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    await _updateImage(
+      item,
+      () => ApiClient.instance.putFile(
+        _imagePath(item),
+        field: 'file',
+        bytes: bytes,
+        filename: picked.name,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final items = _items;
@@ -261,12 +309,48 @@ class _ItemsForCategoryState extends State<_ItemsForCategory> {
           const Divider(),
           Text(
             widget.category.name,
-            style: Theme.of(context).textTheme.labelLarge,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: BrandColors.dark,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           if (items == null)
             const Center(child: CircularProgressIndicator())
           else
-            for (final item in items) Text('• ${item.name}'),
+            for (final item in items)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: MenuItemImage(imageUrl: item.imageUrl, size: 48),
+                title: Text(item.name),
+                trailing: _busyItemId == item.id
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: item.imageUrl == null
+                                ? 'Add image'
+                                : 'Replace image',
+                            icon: const Icon(Icons.add_photo_alternate),
+                            onPressed: () => _pickImage(item),
+                          ),
+                          if (item.imageUrl != null)
+                            IconButton(
+                              tooltip: 'Remove image',
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: () => _updateImage(
+                                item,
+                                () =>
+                                    ApiClient.instance.delete(_imagePath(item)),
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
           Row(
             children: [
               Expanded(

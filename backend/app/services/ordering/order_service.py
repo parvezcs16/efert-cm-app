@@ -15,6 +15,7 @@ from app.models.enums import (
 from app.models.order import Order, OrderItem
 from app.repositories.guest_repository import GuestSessionRepository
 from app.repositories.location_repository import LocationRepository
+from app.repositories.menu_repository import MenuItemRepository
 from app.repositories.order_repository import OrderRepository
 from app.services.audit_service import AuditService
 from app.services.menu.menu_service import MenuService
@@ -29,6 +30,10 @@ CANCELLABLE_STATUSES = {
     OrderStatus.PREPARING,
     OrderStatus.READY,
 }
+
+# Items may only be edited before the kitchen starts work: once QUEUED,
+# items are routed to stations and preparation may already be underway.
+EDITABLE_STATUSES = {OrderStatus.PENDING, OrderStatus.CONFIRMED}
 
 
 class OrderService:
@@ -182,6 +187,64 @@ class OrderService:
 
     async def list_for_guest_session(self, guest_session_id: uuid.UUID) -> list[Order]:
         return await self.orders.list_for_guest_session(guest_session_id)
+
+    async def update_items(
+        self,
+        order_id: uuid.UUID,
+        employee_id: uuid.UUID,
+        *,
+        quantities: dict[uuid.UUID, int],
+    ) -> Order:
+        """Removes items not listed in `quantities` and lowers quantities of
+        the rest. Increases and new items are rejected -- place a new order
+        instead -- so a confirmed order (and any confirmed booking
+        ingredients) never grows behind the kitchen's back. Kept items
+        retain their original unit_price snapshot."""
+        order = await self.get_owned(order_id, employee_id)
+        if order.status not in EDITABLE_STATUSES:
+            raise ValidationAppError(f"Order cannot be updated from status {order.status.value}")
+
+        current = {item.id: item for item in order.items}
+        unknown = set(quantities) - set(current)
+        if unknown:
+            raise ValidationAppError("One or more items do not belong to this order")
+        if not quantities:
+            raise ValidationAppError("An order must keep at least one item; cancel it instead")
+
+        old_values = {str(i.id): i.ordered_quantity for i in order.items}
+        for item_id, quantity in quantities.items():
+            if quantity > current[item_id].ordered_quantity:
+                raise ValidationAppError("Item quantities can only be reduced")
+
+        for item in list(order.items):
+            if item.id not in quantities:
+                order.items.remove(item)
+            else:
+                item.ordered_quantity = quantities[item.id]
+        await self.orders.flush()
+
+        await self.audit.record(
+            action="order.items_updated",
+            entity_type="order",
+            entity_id=str(order.id),
+            actor_employee_id=employee_id,
+            old_values={"items": old_values},
+            new_values={"items": {str(k): v for k, v in quantities.items()}},
+        )
+        await kitchen_ws_manager.broadcast(
+            order.location_id,
+            {
+                "type": "order.items_updated",
+                "order_id": str(order.id),
+                "order_number": order.order_number,
+            },
+        )
+        return order
+
+    async def item_names(self, orders: list[Order]) -> dict[uuid.UUID, str]:
+        return await MenuItemRepository(self.db).get_names(
+            {item.menu_item_id for order in orders for item in order.items}
+        )
 
     async def cancel(self, order_id: uuid.UUID, employee_id: uuid.UUID) -> Order:
         order = await self.get_owned(order_id, employee_id)

@@ -27,6 +27,7 @@ class MenuItem {
   final String categoryId;
   final String name;
   final String? description;
+  final String? imageUrl;
   final String status;
 
   MenuItem({
@@ -34,6 +35,7 @@ class MenuItem {
     required this.categoryId,
     required this.name,
     required this.description,
+    required this.imageUrl,
     required this.status,
   });
 
@@ -42,6 +44,7 @@ class MenuItem {
     categoryId: json['category_id'] as String,
     name: json['name'] as String,
     description: json['description'] as String?,
+    imageUrl: json['image_url'] as String?,
     status: json['status'] as String,
   );
 }
@@ -52,17 +55,20 @@ class MenuBrowseItem {
   final String id;
   final String name;
   final String? description;
+  final String? imageUrl;
 
   MenuBrowseItem({
     required this.id,
     required this.name,
     required this.description,
+    required this.imageUrl,
   });
 
   factory MenuBrowseItem.fromJson(Map<String, dynamic> json) => MenuBrowseItem(
     id: json['id'] as String,
     name: json['name'] as String,
     description: json['description'] as String?,
+    imageUrl: json['image_url'] as String?,
   );
 }
 

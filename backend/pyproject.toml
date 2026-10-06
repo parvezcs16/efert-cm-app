@@ -16,6 +16,7 @@ extend-immutable-calls = [
     "fastapi.Depends",
     "fastapi.Query",
     "fastapi.Path",
+    "fastapi.File",
     "app.api.v1.deps.require_roles",
 ]
 

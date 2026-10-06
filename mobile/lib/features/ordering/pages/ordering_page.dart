@@ -5,6 +5,8 @@ import '../../../core/api_client.dart';
 import '../../../core/models/location.dart';
 import '../../../core/models/menu.dart';
 import '../../../core/models/order.dart';
+import '../../../core/theme.dart';
+import '../../../widgets/brand.dart';
 
 const _orderTypes = [
   ('DINE_IN', 'Dine in'),
@@ -247,7 +249,11 @@ class _OrderingPageState extends State<OrderingPage> {
                     children: [
                       Text(
                         category.name,
-                        style: Theme.of(context).textTheme.titleSmall,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: BrandColors.dark,
+                              fontWeight: FontWeight.w600,
+                            ),
                       ),
                       const SizedBox(height: 8),
                       for (final item in category.items)
@@ -255,14 +261,23 @@ class _OrderingPageState extends State<OrderingPage> {
                           padding: const EdgeInsets.symmetric(vertical: 6),
                           child: Row(
                             children: [
+                              MenuItemImage(imageUrl: item.imageUrl),
+                              const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(item.name),
+                                    Text(
+                                      item.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
                                     if (item.description != null)
                                       Text(
                                         item.description!,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
                                         style: Theme.of(
                                           context,
                                         ).textTheme.bodySmall,

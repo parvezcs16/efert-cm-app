@@ -5,45 +5,51 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  /* EFERT brand greens, sampled from the logo (public/efert-logo.png). */
+  --brand-dark: #006937;
+  --brand: #00a651;
+  --brand-lime: #7ab02c;
+  --brand-lime-light: #c2d887;
+
+  --background: #f6f9f4;
+  --foreground: #142019;
+  --card: #ffffff;
+  --card-foreground: #142019;
+  --popover: #ffffff;
+  --popover-foreground: #142019;
+  --primary: #006937;
+  --primary-foreground: #ffffff;
+  --secondary: #eaf3e1;
+  --secondary-foreground: #0d3b21;
+  --muted: #eef3ec;
+  --muted-foreground: #58685d;
+  --accent: #e3f2e8;
+  --accent-foreground: #0d3b21;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: #dbe5d8;
+  --input: #d3dfd0;
+  --ring: #00a651;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: #0c1710;
+  --foreground: #e8f1ea;
+  --card: #122119;
+  --card-foreground: #e8f1ea;
+  --popover: #122119;
+  --popover-foreground: #e8f1ea;
+  --primary: #2fbf6b;
+  --primary-foreground: #04150b;
+  --secondary: #1b3023;
+  --secondary-foreground: #e8f1ea;
+  --muted: #18291e;
+  --muted-foreground: #9cb3a3;
+  --accent: #1e3a28;
+  --accent-foreground: #e8f1ea;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: rgb(255 255 255 / 10%);
+  --input: rgb(255 255 255 / 15%);
+  --ring: #2fbf6b;
 }
 
 @theme inline {
@@ -70,6 +76,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand: var(--brand);
+  --color-brand-lime: var(--brand-lime);
+  --color-brand-lime-light: var(--brand-lime-light);
 }
 
 @layer base {
@@ -79,4 +89,19 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Kitchen display: briefly highlight tickets that just arrived. */
+@keyframes kds-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(56 189 248 / 0);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgb(56 189 248 / 0.9);
+  }
+}
+
+.kds-flash {
+  animation: kds-flash 1s ease-in-out 3;
 }

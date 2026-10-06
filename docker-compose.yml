@@ -22,6 +22,9 @@ services:
       CORS_ORIGINS: http://localhost:8080
       ENVIRONMENT: development
       DEBUG: "true"
+      MEDIA_ROOT: /app/media
+    volumes:
+      - media_data:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -37,3 +40,4 @@ services:
 
 volumes:
   db_data:
+  media_data:

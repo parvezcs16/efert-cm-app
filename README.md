@@ -99,6 +99,13 @@ Starts Postgres, the backend (migrations run automatically on container
 start, then serves on :8000), and the frontend behind Nginx on :8080, which
 proxies `/api/*` and `/ws/*` to the backend.
 
+### Default login
+
+A default admin (`ADMIN001` / `Admin@12345`) is seeded on Docker start, or
+locally via `python -m app.scripts.seed_admin`. See
+[docs/login-and-registration.md](docs/login-and-registration.md) for
+details and the employee self-registration steps.
+
 ## Status
 
 - **Phase 1 (foundation)**: project scaffolding, configuration, logging,
